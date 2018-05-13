@@ -66,6 +66,9 @@ type UpdatePodOptions struct {
 	OnCompleteFunc OnCompleteFunc
 	// if update type is kill, use the specified options to kill the pod.
 	KillPodOptions *KillPodOptions
+
+	//EDM
+	UpdateID string
 }
 
 // PodWorkers is an abstract interface for testability.
@@ -87,6 +90,9 @@ type syncPodOptions struct {
 	podStatus *kubecontainer.PodStatus
 	// if update type is kill, use the specified options to kill the pod.
 	killPodOptions *KillPodOptions
+
+	//EDM
+	updateID string
 }
 
 // the function to invoke to perform a sync.
@@ -133,6 +139,9 @@ type podWorkers struct {
 
 	// podCache stores kubecontainer.PodStatus for all pods.
 	podCache kubecontainer.Cache
+
+	// goroutine ID for a worker
+	id int
 }
 
 func newPodWorkers(syncPodFn syncPodFnType, recorder record.EventRecorder, workQueue queue.WorkQueue,
@@ -147,6 +156,7 @@ func newPodWorkers(syncPodFn syncPodFnType, recorder record.EventRecorder, workQ
 		resyncInterval:            resyncInterval,
 		backOffPeriod:             backOffPeriod,
 		podCache:                  podCache,
+		id:                        10000,
 	}
 }
 
@@ -165,14 +175,17 @@ func (p *podWorkers) managePodLoop(podUpdates <-chan UpdatePodOptions) {
 				// This is the legacy event thrown by manage pod loop
 				// all other events are now dispatched from syncPodFn
 				p.recorder.Eventf(update.Pod, v1.EventTypeWarning, events.FailedSync, "error determining status: %v", err)
+				glog.V(5).Infof("EDM ManagePodLoop exit with err pod %s, updateID <%s>", podUID, update.UpdateID)
 				return err
 			}
+			glog.V(5).Infof("EDM ManagePodLoop calls syncPodFn pod %s, updateID <%s>", podUID, update.UpdateID)
 			err = p.syncPodFn(syncPodOptions{
 				mirrorPod:      update.MirrorPod,
 				pod:            update.Pod,
 				podStatus:      status,
 				killPodOptions: update.KillPodOptions,
 				updateType:     update.UpdateType,
+				updateID:       update.UpdateID,
 			})
 			lastSyncTime = time.Now()
 			return err
@@ -212,18 +225,22 @@ func (p *podWorkers) UpdatePod(options *UpdatePodOptions) {
 		// kubelet just restarted. In either case the kubelet is willing to believe
 		// the status of the pod for the first pod worker sync. See corresponding
 		// comment in syncPod.
+		p.id ++
 		go func() {
 			defer runtime.HandleCrash()
+			glog.V(5).Infof("EDM UpdatePod kicks off ManagePodLoop <pod worker> with goroutine id<%d>", p.id)
 			p.managePodLoop(podUpdates)
 		}()
 	}
 	if !p.isWorking[pod.UID] {
 		p.isWorking[pod.UID] = true
 		podUpdates <- *options
+		glog.V(5).Infof("EDM UpdatePod push updateID<%s> to goroutine id<%d>", options.UpdateID, p.id)
 	} else {
 		// if a request to kill a pod is pending, we do not let anything overwrite that request.
 		update, found := p.lastUndeliveredWorkUpdate[pod.UID]
 		if !found || update.UpdateType != kubetypes.SyncPodKill {
+			glog.V(5).Infof("EDM UpdatePod save updateID<%s> to goroutine id<%d>", options.UpdateID, p.id)
 			p.lastUndeliveredWorkUpdate[pod.UID] = *options
 		}
 	}
@@ -233,10 +250,12 @@ func (p *podWorkers) removeWorker(uid types.UID) {
 	if ch, ok := p.podUpdates[uid]; ok {
 		close(ch)
 		delete(p.podUpdates, uid)
+		glog.V(5).Infof("EDM removeWorker removes channel for pod %s with goroutine id<%d>", uid, p.id)
 		// If there is an undelivered work update for this pod we need to remove it
 		// since per-pod goroutine won't be able to put it to the already closed
 		// channel when it finish processing the current work update.
 		if _, cached := p.lastUndeliveredWorkUpdate[uid]; cached {
+			glog.V(5).Infof("EDM removeWorker remove saved updateID<%s> for pod with goroutine id<%d>", p.lastUndeliveredWorkUpdate[uid].UpdateID, uid, p.id)
 			delete(p.lastUndeliveredWorkUpdate, uid)
 		}
 	}
@@ -275,6 +294,7 @@ func (p *podWorkers) checkForUpdates(uid types.UID) {
 	defer p.podLock.Unlock()
 	if workUpdate, exists := p.lastUndeliveredWorkUpdate[uid]; exists {
 		p.podUpdates[uid] <- workUpdate
+		glog.V(5).Infof("EDM checkForUpdates push updateID<%s> to channel for pod %s with goroutine id<%d>", workUpdate.UpdateID, uid, p.id)
 		delete(p.lastUndeliveredWorkUpdate, uid)
 	} else {
 		p.isWorking[uid] = false

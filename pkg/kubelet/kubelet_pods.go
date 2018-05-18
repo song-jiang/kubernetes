@@ -843,6 +843,7 @@ func (kl *Kubelet) killPod(pod *v1.Pod, runningPod *kubecontainer.Pod, status *k
 	}
 
 	// Call the container runtime KillPod method which stops all running containers of the pod
+	glog.V(2).Infof("EDM start to kill pod: %q", format.Pod(pod))
 	if err := kl.containerRuntime.KillPod(pod, p, gracePeriodOverride); err != nil {
 		return err
 	}

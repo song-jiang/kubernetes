@@ -24,6 +24,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
@@ -521,6 +522,9 @@ func (m *kubeGenericRuntimeManager) restoreSpecsFromContainerLabels(containerID 
 // * Stop the container.
 func (m *kubeGenericRuntimeManager) killContainer(pod *v1.Pod, containerID kubecontainer.ContainerID, containerName string, reason string, gracePeriodOverride *int64) error {
 	var containerSpec *v1.Container
+	glog.V(2).Infof("EDM Killing start for container %q", containerID.String())
+
+        debug.PrintStack()
 	if pod != nil {
 		if containerSpec = kubecontainer.GetContainerSpec(pod, containerName); containerSpec == nil {
 			return fmt.Errorf("failed to get containerSpec %q(id=%q) in pod %q when killing container for reason %q",

@@ -1449,6 +1449,8 @@ func (kl *Kubelet) syncPod(o syncPodOptions) error {
 	podStatus := o.podStatus
 	updateType := o.updateType
 
+	glog.V(5).Infof("EDM SyncPod started -- start pod %q, updateID <%s>", format.Pod(pod), o.updateID)
+
 	// if we want to kill a pod, do it now!
 	if updateType == kubetypes.SyncPodKill {
 		killPodOptions := o.killPodOptions
@@ -1536,12 +1538,15 @@ func (kl *Kubelet) syncPod(o syncPodOptions) error {
 				syncErr = fmt.Errorf("pod cannot be run: %s", runnable.Message)
 			}
 		}
+
+		glog.V(5).Infof("EDM SyncPod exit upateID <%s>, syncErr <%v>", o.updateID, syncErr)
 		return syncErr
 	}
 
 	// If the network plugin is not ready, only start the pod if it uses the host network
 	if rs := kl.runtimeState.networkErrors(); len(rs) != 0 && !kubecontainer.IsHostNetworkPod(pod) {
 		kl.recorder.Eventf(pod, v1.EventTypeWarning, events.NetworkNotReady, "network is not ready: %v", rs)
+		glog.V(5).Infof("EDM SyncPod exit updateID <%s>. Network is not ready.", o.updateID)
 		return fmt.Errorf("network is not ready: %v", rs)
 	}
 
@@ -1585,6 +1590,7 @@ func (kl *Kubelet) syncPod(o syncPodOptions) error {
 				}
 				if err := pcm.EnsureExists(pod); err != nil {
 					kl.recorder.Eventf(pod, v1.EventTypeWarning, events.FailedToCreatePodContainer, "unable to ensure pod container exists: %v", err)
+					glog.V(5).Infof("EDM SyncPod exit restart updateID <%s>, err <%v>", o.updateID, err)
 					return fmt.Errorf("failed to ensure that the pod: %v cgroups exist and are correctly applied: %v", pod.UID, err)
 				}
 			}
@@ -1642,6 +1648,7 @@ func (kl *Kubelet) syncPod(o syncPodOptions) error {
 
 	// Call the container runtime's SyncPod callback
 	result := kl.containerRuntime.SyncPod(pod, apiPodStatus, podStatus, pullSecrets, kl.backOff)
+	glog.V(5).Infof("EDM SyncPod complete -- start pod %q, updateID <%s>", format.Pod(pod), o.updateID)
 	kl.reasonCache.Update(pod.UID, result)
 	if err := result.Error(); err != nil {
 		// Do not record an event here, as we keep all event logging for sync pod failures
@@ -1962,11 +1969,17 @@ func (kl *Kubelet) dispatchWork(pod *v1.Pod, syncType kubetypes.SyncPodType, mir
 		}
 		return
 	}
+
+	updateID := fmt.Sprintf("%s_%s(%s)", syncType.String(), start.String(), pod.UID)
+
+	glog.V(5).Infof("EDM dispatchWork pod %q, updateID <%s>, mirror pod %v", format.Pod(pod), updateID, mirrorPod)
+
 	// Run the sync in an async worker.
 	kl.podWorkers.UpdatePod(&UpdatePodOptions{
 		Pod:        pod,
 		MirrorPod:  mirrorPod,
 		UpdateType: syncType,
+		UpdateID:   updateID,
 		OnCompleteFunc: func(err error) {
 			if err != nil {
 				metrics.PodWorkerLatency.WithLabelValues(syncType.String()).Observe(metrics.SinceInMicroseconds(start))

@@ -1453,6 +1453,7 @@ func (kl *Kubelet) syncPod(o syncPodOptions) error {
 
 	// if we want to kill a pod, do it now!
 	if updateType == kubetypes.SyncPodKill {
+		glog.V(5).Infof("EDM SyncPod syncPodKill -- start pod %q, updateID <%s>", format.Pod(pod), o.updateID)
 		killPodOptions := o.killPodOptions
 		if killPodOptions == nil || killPodOptions.PodStatusFunc == nil {
 			return fmt.Errorf("kill pod options are required if update type is kill")
@@ -1527,6 +1528,9 @@ func (kl *Kubelet) syncPod(o syncPodOptions) error {
 	// Kill pod if it should not be running
 	if !runnable.Admit || pod.DeletionTimestamp != nil || apiPodStatus.Phase == v1.PodFailed {
 		var syncErr error
+		glog.V(5).Infof("EDM SyncPod kill pod -- pod %q, updateID <%s>", format.Pod(pod), o.updateID)
+		glog.V(5).Infof("EDM SyncPod kill pod -- runnable.Admit %s, deletion timestamp %v, apiPodStatus.Phase %v",
+			runnable.Admit, pod.DeletionTimestamp, apiPodStatus.Phase)
 		if err := kl.killPod(pod, nil, podStatus, nil); err != nil {
 			kl.recorder.Eventf(pod, v1.EventTypeWarning, events.FailedToKillPod, "error killing pod: %v", err)
 			syncErr = fmt.Errorf("error killing pod: %v", err)

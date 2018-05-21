@@ -527,6 +527,8 @@ func (m *kubeGenericRuntimeManager) killContainer(pod *v1.Pod, containerID kubec
         debug.PrintStack()
 	if pod != nil {
 		if containerSpec = kubecontainer.GetContainerSpec(pod, containerName); containerSpec == nil {
+			glog.V(2).Infof("EDM failed to get containerSpec %q(id=%q) in pod %q when killing container for reason %q",
+				containerName, containerID.String(), format.Pod(pod), reason)
 			return fmt.Errorf("failed to get containerSpec %q(id=%q) in pod %q when killing container for reason %q",
 				containerName, containerID.String(), format.Pod(pod), reason)
 		}
@@ -534,6 +536,7 @@ func (m *kubeGenericRuntimeManager) killContainer(pod *v1.Pod, containerID kubec
 		// Restore necessary information if one of the specs is nil.
 		restoredPod, restoredContainer, err := m.restoreSpecsFromContainerLabels(containerID)
 		if err != nil {
+			glog.V(2).Infof("EDM Killing for container restore err:%v", err)
 			return err
 		}
 		pod, containerSpec = restoredPod, restoredContainer
